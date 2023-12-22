@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/Crystalix007/anticipate/app"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/template/html/v2"
 	"github.com/spf13/cobra"
 )
@@ -19,33 +21,49 @@ const (
 
 // Command returns a new instance of the serve command.
 func Command() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   Subcommand,
 		Short: Short,
 		RunE:  Serve,
 	}
+
+	cmd.Flags().BoolP("verbose", "v", false, "verbose output")
+
+	return cmd
 }
 
 // Serve is a function that starts the server and handles incoming requests.
 // It initializes the HTML template engine, sets up routes, and listens on port 8080.
 // The function returns an error if there is an issue starting the server.
-func Serve(_ *cobra.Command, _ []string) error {
+func Serve(cmd *cobra.Command, _ []string) error {
 	engine := html.New("./templates", ".tmpl")
-	app := fiber.New(fiber.Config{
+	mux := fiber.New(fiber.Config{
 		Views: engine,
 	})
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil && verbose {
+		mux.Use(logger.New())
+	}
+
+	mux.Get("/", func(c *fiber.Ctx) error {
 		return c.Render("index", nil)
 	})
 
-	app.Get("/static/+", func(c *fiber.Ctx) error {
+	mux.Get("/static/+", func(c *fiber.Ctx) error {
 		return c.SendFile(fmt.Sprintf("./static/%s", c.Params("+")))
 	})
 
-	app.Get("/favicon.ico", func(c *fiber.Ctx) error {
+	mux.Get("/favicon.ico", func(c *fiber.Ctx) error {
 		return c.Redirect("/static/favicon.ico", http.StatusMovedPermanently)
 	})
 
-	return app.Listen(":8080")
+	app := &app.App{}
+
+	for _, route := range app.DeclareRoutes() {
+		mux.Add(route.Method, route.Path, route.Handler)
+	}
+
+	defer app.Close()
+
+	return mux.Listen(":8080")
 }
