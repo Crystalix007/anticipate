@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/Crystalix007/anticipate/lib"
@@ -8,28 +9,40 @@ import (
 
 type App struct {
 	comments []string
+
+	logger *slog.Logger
 }
 
+// Ensure [App] implements [lib.App].
 var _ lib.App = &App{}
+
+// New creates a new instance of the app with the provided options.
+// It accepts optional configuration options as variadic arguments.
+func New(opts ...Option) *App {
+	a := &App{}
+
+	for _, opt := range opts {
+		opt(a)
+	}
+
+	a.setDefaults()
+
+	return a
+}
 
 // DeclareRoutes declares the routes for the App.
 // It returns a slice of lib.Route containing the routes.
-func (a *App) DeclareRoutes() []lib.Route {
-	return []lib.Route{
+func (a *App) DeclareRoutes() lib.Routes {
+	return lib.Routes{
 		{
 			Method:  http.MethodGet,
-			Path:    "/comments",
+			Path:    "/api/comments",
 			Handler: a.ShowComments,
 		},
 		{
 			Method:  http.MethodPost,
-			Path:    "/comments",
+			Path:    "/api/comments",
 			Handler: a.AddComment,
-		},
-		{
-			Method:  http.MethodGet,
-			Path:    "/sw.js",
-			Handler: a.ServeSW,
 		},
 	}
 }

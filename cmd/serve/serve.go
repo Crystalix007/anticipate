@@ -2,12 +2,14 @@ package serve
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/Crystalix007/anticipate/app"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/template/html/v2"
+	"github.com/Crystalix007/anticipate/lib"
+	"github.com/Crystalix007/anticipate/static"
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
 	"github.com/spf13/cobra"
 )
 
@@ -36,34 +38,42 @@ func Command() *cobra.Command {
 // It initializes the HTML template engine, sets up routes, and listens on port 8080.
 // The function returns an error if there is an issue starting the server.
 func Serve(cmd *cobra.Command, _ []string) error {
-	engine := html.New("./templates", ".tmpl")
-	mux := fiber.New(fiber.Config{
-		Views: engine,
-	})
+	mux := chi.NewMux()
 
 	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil && verbose {
-		mux.Use(logger.New())
+		mux.Use(middleware.Logger)
 	}
 
-	mux.Get("/", func(c *fiber.Ctx) error {
-		return c.Render("index", nil)
+	mux.Use(middleware.Recoverer)
+	mux.Use(middleware.CleanPath)
+
+	mux.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		lib.ErrHandler(w, r, lib.ServeTemplateHTML(w, "index.html", nil))
 	})
 
-	mux.Get("/static/+", func(c *fiber.Ctx) error {
-		return c.SendFile(fmt.Sprintf("./static/%s", c.Params("+")))
-	})
+	mux.Mount("/static/js/", http.StripPrefix("/static/js/", static.JS))
+	mux.Mount("/static/wasm/", http.StripPrefix("/static/wasm/", static.WASM))
 
-	mux.Get("/favicon.ico", func(c *fiber.Ctx) error {
-		return c.Redirect("/static/favicon.ico", http.StatusMovedPermanently)
-	})
+	mux.Get("/favicon.ico", static.Favicon.ServeHTTP)
+	mux.Get("/sw.js", static.JS.ServeHTTP)
 
-	app := &app.App{}
+	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	errLogger := lib.LogErrors(logger)
+	app := app.New(app.WithLogger(logger))
 
 	for _, route := range app.DeclareRoutes() {
-		mux.Add(route.Method, route.Path, route.Handler)
+		mux.Method(route.Method, route.Path, lib.FuncErrHandler(
+			errLogger(route.Handler),
+		))
 	}
 
 	defer app.Close()
 
-	return mux.Listen(":8080")
+	fmt.Fprintf(
+		cmd.ErrOrStderr(),
+		"Listening on port 8080 with %d routes\n\n",
+		len(mux.Routes()),
+	)
+
+	return http.ListenAndServe(":8080", mux)
 }
